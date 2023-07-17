@@ -7,6 +7,9 @@
 
 #include <ACAN2517FD.h>
 
+#ifdef ARDUINO_SSCI_ISP1807_BREAKOUT
+	#define NOT_AN_INTERRUPT -1
+#endif
 //----------------------------------------------------------------------------------------------------------------------
 
 static const uint8_t TXBWS = 0 ;
@@ -220,10 +223,17 @@ uint32_t ACAN2517FD::begin (const ACAN2517FDSettings & inSettings,
     errorCode |= kInconsistentBitRateSettings ;
   }
 //----------------------------------- Check mINT has interrupt capability
-  const int8_t itPin = digitalPinToInterrupt (mINT) ;
-  if ((mINT != 255) && (itPin == NOT_AN_INTERRUPT)) {
-    errorCode = kINTPinIsNotAnInterrupt ;
-  }
+  #ifdef ARDUINO_SSCI_ISP1807_BREAKOUT
+    // const int8_t itPin = digitalPinToInterrupt (mINT) ;
+    // if ((mINT != 255) && (itPin == NOT_AN_INTERRUPT)) {
+    //   errorCode = kINTPinIsNotAnInterrupt ;
+    // }
+  #else
+    const int8_t itPin = digitalPinToInterrupt (mINT) ;
+    if ((mINT != 255) && (itPin == NOT_AN_INTERRUPT)) {
+      errorCode = kINTPinIsNotAnInterrupt ;
+    }
+  #endif
 //----------------------------------- Check interrupt service routine is not null
   if ((mINT != 255) && (inInterruptServiceRoutine == NULL)) {
     errorCode |= kISRIsNull ;
@@ -348,7 +358,11 @@ uint32_t ACAN2517FD::begin (const ACAN2517FDSettings & inSettings,
     }
   }
 //----------------------------------- Set full speed clock
+#ifdef ARDUINO_SSCI_ISP1807_BREAKOUT
+  mSPISettings = SPISettings ( 1000000UL, MSBFIRST, SPI_MODE0) ;
+#else
   mSPISettings = SPISettings (inSettings.sysClock () / 2, MSBFIRST, SPI_MODE0) ;
+#endif
 //----------------------------------- Checking SPI connection is on (with a full speed clock)
 //    We write and read back 2517 RAM at address 0x400
   for (uint32_t i=1 ; (i != 0) && (errorCode == 0) ; i <<= 1) {
@@ -507,8 +521,13 @@ uint32_t ACAN2517FD::begin (const ACAN2517FDSettings & inSettings,
       #ifdef ARDUINO_ARCH_ESP32
         attachInterrupt (itPin, inInterruptServiceRoutine, FALLING) ;
       #else
-        attachInterrupt (itPin, inInterruptServiceRoutine, LOW) ; // Thank to Flole998
-        mSPI.usingInterrupt (itPin) ; // usingInterrupt is not implemented in Arduino ESP32
+        #ifdef ARDUINO_SSCI_ISP1807_BREAKOUT
+          // attachInterrupt (itPin, inInterruptServiceRoutine, LOW) ; // Thank to Flole998
+          // mSPI.usingInterrupt (itPin) ; // usingInterrupt is not implemented in Arduino ESP32
+        #else
+          attachInterrupt (itPin, inInterruptServiceRoutine, LOW) ; // Thank to Flole998
+          mSPI.usingInterrupt (itPin) ; // usingInterrupt is not implemented in Arduino ESP32
+        #endif
       #endif
     }
   // If you begin() multiple times without constructor,
@@ -528,6 +547,8 @@ bool ACAN2517FD::end (void) {
   mSPI.beginTransaction (mSPISettings) ;
     #ifdef ARDUINO_ARCH_ESP32
       taskDISABLE_INTERRUPTS () ;
+    #elif defined(ARDUINO_SSCI_ISP1807_BREAKOUT)
+      // noInterrupts () ;    
     #else
       noInterrupts () ;
     #endif
@@ -567,6 +588,8 @@ bool ACAN2517FD::end (void) {
   //---
     #ifdef ARDUINO_ARCH_ESP32
       taskENABLE_INTERRUPTS () ;
+    #elif defined(ARDUINO_SSCI_ISP1807_BREAKOUT)
+      // interrupts () ;
     #else
       interrupts () ;
     #endif
@@ -585,6 +608,8 @@ bool ACAN2517FD::tryToSend (const CANFDMessage & inMessage) {
     mSPI.beginTransaction (mSPISettings) ;
       #ifdef ARDUINO_ARCH_ESP32
         taskDISABLE_INTERRUPTS () ;
+      #elif defined(ARDUINO_SSCI_ISP1807_BREAKOUT)
+        // noInterrupts () ;      
       #else
         noInterrupts () ;
       #endif
@@ -601,6 +626,8 @@ bool ACAN2517FD::tryToSend (const CANFDMessage & inMessage) {
         }
       #ifdef ARDUINO_ARCH_ESP32
         taskENABLE_INTERRUPTS () ;
+      #elif defined(ARDUINO_SSCI_ISP1807_BREAKOUT)
+        // interrupts () ;            
       #else
         interrupts () ;
       #endif
@@ -776,12 +803,16 @@ bool ACAN2517FD::available (void) {
   mSPI.beginTransaction (mSPISettings) ;
     #ifdef ARDUINO_ARCH_ESP32
       taskDISABLE_INTERRUPTS () ;
+    #elif defined(ARDUINO_SSCI_ISP1807_BREAKOUT)
+      // noInterrupts () ;
     #else
       noInterrupts () ;
     #endif
       const bool hasReceivedMessage = mDriverReceiveBuffer.count () > 0 ;
     #ifdef ARDUINO_ARCH_ESP32
       taskENABLE_INTERRUPTS () ;
+    #elif defined(ARDUINO_SSCI_ISP1807_BREAKOUT)
+      // interrupts () ;    
     #else
       interrupts () ;
     #endif
@@ -795,6 +826,8 @@ bool ACAN2517FD::receive (CANFDMessage & outMessage) {
   mSPI.beginTransaction (mSPISettings) ;
     #ifdef ARDUINO_ARCH_ESP32
       taskDISABLE_INTERRUPTS () ;
+    #elif defined(ARDUINO_SSCI_ISP1807_BREAKOUT)
+      // noInterrupts () ;    
     #else
       noInterrupts () ;
     #endif
@@ -811,6 +844,8 @@ bool ACAN2517FD::receive (CANFDMessage & outMessage) {
       }
     #ifdef ARDUINO_ARCH_ESP32
       taskENABLE_INTERRUPTS () ;
+    #elif defined(ARDUINO_SSCI_ISP1807_BREAKOUT)
+      // interrupts () ;    
     #else
       interrupts () ;
     #endif
@@ -854,9 +889,14 @@ bool ACAN2517FD::dispatchReceivedMessage (const tFilterMatchCallBack inFilterMat
 
 #ifndef ARDUINO_ARCH_ESP32
   void ACAN2517FD::poll (void) {
-    noInterrupts () ;
+    
+    #if defined(ARDUINO_SSCI_ISP1807_BREAKOUT)
       isr_poll_core () ;
-    interrupts () ;
+    #else
+      noInterrupts () ;
+        isr_poll_core () ;
+      interrupts () ;
+    #endif
   }
 #endif
 
@@ -1104,12 +1144,16 @@ void ACAN2517FD::writeRegister8 (const uint16_t inRegisterAddress, const uint8_t
   mSPI.beginTransaction (mSPISettings) ;
     #ifdef ARDUINO_ARCH_ESP32
       taskDISABLE_INTERRUPTS () ;
+    #elif defined(ARDUINO_SSCI_ISP1807_BREAKOUT)
+      // noInterrupts () ;
     #else
       noInterrupts () ;
     #endif
       writeRegister8Assume_SPI_transaction (inRegisterAddress, inValue) ;
     #ifdef ARDUINO_ARCH_ESP32
       taskENABLE_INTERRUPTS () ;
+    #elif defined(ARDUINO_SSCI_ISP1807_BREAKOUT)
+      // interrupts () ;
     #else
       interrupts () ;
     #endif
@@ -1122,12 +1166,16 @@ uint8_t ACAN2517FD::readRegister8 (const uint16_t inRegisterAddress) {
   mSPI.beginTransaction (mSPISettings) ;
     #ifdef ARDUINO_ARCH_ESP32
       taskDISABLE_INTERRUPTS () ;
+    #elif defined(ARDUINO_SSCI_ISP1807_BREAKOUT)
+      // noInterrupts () ;
     #else
       noInterrupts () ;
     #endif
       const uint8_t result = readRegister8Assume_SPI_transaction (inRegisterAddress) ;
     #ifdef ARDUINO_ARCH_ESP32
       taskENABLE_INTERRUPTS () ;
+    #elif defined(ARDUINO_SSCI_ISP1807_BREAKOUT)
+      // interrupts () ;
     #else
       interrupts () ;
     #endif
@@ -1141,12 +1189,16 @@ uint16_t ACAN2517FD::readRegister16 (const uint16_t inRegisterAddress) {
   mSPI.beginTransaction (mSPISettings) ;
     #ifdef ARDUINO_ARCH_ESP32
       taskDISABLE_INTERRUPTS () ;
+    #elif defined(ARDUINO_SSCI_ISP1807_BREAKOUT)
+      // noInterrupts () ;
     #else
       noInterrupts () ;
     #endif
       const uint16_t result = readRegister16Assume_SPI_transaction (inRegisterAddress) ;
     #ifdef ARDUINO_ARCH_ESP32
       taskENABLE_INTERRUPTS () ;
+    #elif defined(ARDUINO_SSCI_ISP1807_BREAKOUT)
+      // interrupts () ;
     #else
       interrupts () ;
     #endif
@@ -1160,12 +1212,16 @@ void ACAN2517FD::writeRegister32 (const uint16_t inRegisterAddress, const uint32
   mSPI.beginTransaction (mSPISettings) ;
     #ifdef ARDUINO_ARCH_ESP32
       taskDISABLE_INTERRUPTS () ;
+    #elif defined(ARDUINO_SSCI_ISP1807_BREAKOUT)
+      // noInterrupts () ;
     #else
       noInterrupts () ;
     #endif
       writeRegister32Assume_SPI_transaction (inRegisterAddress, inValue) ;
     #ifdef ARDUINO_ARCH_ESP32
       taskENABLE_INTERRUPTS () ;
+    #elif defined(ARDUINO_SSCI_ISP1807_BREAKOUT)
+      // interrupts () ;
     #else
       interrupts () ;
     #endif
@@ -1178,12 +1234,16 @@ uint32_t ACAN2517FD::readRegister32 (const uint16_t inRegisterAddress) {
   mSPI.beginTransaction (mSPISettings) ;
     #ifdef ARDUINO_ARCH_ESP32
       taskDISABLE_INTERRUPTS () ;
+    #elif defined(ARDUINO_SSCI_ISP1807_BREAKOUT)
+      // noInterrupts () ;
     #else
       noInterrupts () ;
     #endif
       const uint32_t result = readRegister32Assume_SPI_transaction (inRegisterAddress) ;
     #ifdef ARDUINO_ARCH_ESP32
       taskENABLE_INTERRUPTS () ;
+    #elif defined(ARDUINO_SSCI_ISP1807_BREAKOUT)
+      // interrupts () ;
     #else
       interrupts () ;
     #endif
@@ -1230,6 +1290,8 @@ void ACAN2517FD::reset2517FD (void) {
   mSPI.beginTransaction (mSPISettings) ; // Check RESET is performed with 1 MHz clock
     #ifdef ARDUINO_ARCH_ESP32
       taskDISABLE_INTERRUPTS () ;
+    #elif defined(ARDUINO_SSCI_ISP1807_BREAKOUT)
+      // noInterrupts () ;
     #else
       noInterrupts () ;
     #endif
@@ -1238,6 +1300,8 @@ void ACAN2517FD::reset2517FD (void) {
       deassertCS () ;
     #ifdef ARDUINO_ARCH_ESP32
       taskENABLE_INTERRUPTS () ;
+    #elif defined(ARDUINO_SSCI_ISP1807_BREAKOUT)
+      // interrupts () ;
     #else
       interrupts () ;
     #endif
